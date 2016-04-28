@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+
+const program = require('commander');
+const pkg = require(__dirname + '/package');
+
+program
+    .version(pkg.version)
+    .description(pkg.description);
+
+program
+    .command('move <origin> <dest>', 'copy issue from origin to destination, and close origin issue')
+    .parse(process.argv);

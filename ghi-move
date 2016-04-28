@@ -1,0 +1,261 @@
+#!/usr/bin/env node
+
+const moment = require('moment');
+const prompt = require('prompt');
+const request = require('request');
+
+var username = null;
+var password = null;
+var uri = null;
+
+console.log('Enter your GitHub credentials:');
+
+prompt.start();
+prompt.get(['username', 'password', 'endpoint_uri'], (err, res) => {
+    username = res.username;
+    password = res.password;
+    uri = res.endpoint_uri;
+
+    var organizations = null;
+    var repositories = null;
+
+    getOperableOrgs((orgs) => {
+        organizations = orgs;
+
+        getOperableRepos((repos) => {
+            repositories = repos;
+
+            promptOrigin(organizations, repositories);
+        })
+    });
+});
+
+function getOperableOrgs (callback) {
+    request({
+        uri: `${uri}/user/orgs`,
+        auth: {
+            username: username,
+            password: password
+        }
+    }, (err, res, body) => {
+        var orgs = [];
+
+        if (err) {
+            return console.log('There was an error getting your organizations.');
+        }
+
+        if (!err && res.statusCode == 200) {
+            JSON.parse(body).forEach((org) => {
+                orgs.push(org.login);
+            });
+
+            callback(orgs);
+        }
+
+        if (res.statusCode === 401) {
+            return console.log('Your credentials are incorrect. Please try again.');
+        }
+    });
+}
+
+function getOperableRepos (callback) {
+    request({
+        uri: `${uri}/user/repos`,
+        auth: {
+            username: username,
+            password: password
+        }
+    }, (err, res, body) => {
+        var repos = [];
+
+        if (err) {
+            return console.log('There was an error getting your repositories.');
+        }
+
+        if (!err && res.statusCode == 200) {
+            JSON.parse(body).forEach((repo) => {
+                repos.push(repo.name);
+            });
+
+            callback(repos);
+        }
+    });
+}
+
+function promptOrigin (orgs, repos) {
+    var schema = {
+        properties: {
+            organization: {
+                description: 'Origin organization',
+                type: 'string',
+                conform: function (value) {
+                    return orgs.indexOf(value) > -1 ? true : false;
+                },
+                message: 'You don\'t have access to that organization',
+                required: true
+            },
+            repository: {
+                description: 'Origin repository',
+                type: 'string',
+                conform: function (value) {
+                    return repos.indexOf(value) > -1 ? true : false;
+                },
+                message: `You don\'t have access to that repository, try one of these:\n${repos.join(',')}`,
+                required: true,
+            },
+            id: {
+                description: 'Origin ID',
+                type: 'number',
+                required: true
+            }
+        }
+    };
+
+    console.log('Where do you want to move the issue from?');
+    prompt.get(schema, (err, res) => {
+        var origin = null;
+
+        if (err) {
+            return console.log('There was an error.');
+        }
+
+        origin_data = res;
+
+        promptDest(orgs, repos, origin_data);
+    });
+}
+
+function promptDest (orgs, repos, origin_data) {
+    var schema = {
+        properties: {
+            organization: {
+                description: 'Destination organization',
+                type: 'string',
+                conform: function (value) {
+                    return orgs.indexOf(value) > -1 ? true : false;
+                },
+                message: 'You don\'t have access to that organization',
+                required: true
+            },
+            repository: {
+                description: 'Destination repository',
+                type: 'string',
+                conform: function (value) {
+                    return repos.indexOf(value) > -1 ? true : false;
+                },
+                message: 'You don\'t have access to that repository',
+                required: true,
+            }
+        }
+    };
+
+    console.log('Where do you want to move the issue to?');
+    prompt.get(schema, (err, res) => {
+        var dest_data = null;
+
+        if (err) {
+            return console.log('There was an error.');
+        }
+
+        dest_data = res;
+
+        moveIssue(origin_data, dest_data);
+    });
+}
+
+function getOriginIssue (origin_data, callback) {
+    request({
+        uri: `${uri}/repos/${origin_data.organization}/${origin_data.repository}/issues/${origin_data.id}`,
+        auth: {
+            username: username,
+            password: password
+        }
+    }, (err, res, body) => {
+        var origin = null;
+
+        if (err) {
+            return console.log('There was an error getting your issue.');
+        }
+
+        if (!err && res.statusCode == 200) {
+            origin = JSON.parse(body);
+            callback(origin);
+        }
+    });
+}
+
+function moveIssue (origin_data, dest_data) {
+    createIssue(origin_data, dest_data, (origin, dest) => {
+        closeIssue(origin, dest);
+    });
+}
+
+function createIssue(origin_data, dest_data, callback) {
+    getOriginIssue(origin_data, (origin) => {
+        request.post({
+            uri: `${uri}/repos/${dest_data.organization}/${dest_data.repository}/issues`,
+            auth: {
+                username: username,
+                password: password
+            },
+            body: {
+                title: origin.title,
+                body: origin.body,
+                assignee: origin.assignee.login
+            },
+            json: true
+        }, (err, res, dest) => {
+            if (err) {
+                return console.log(err);
+            }
+
+            callback(origin, dest);
+        });
+    });
+}
+
+function addComment (origin, dest, callback) {
+    request.post({
+        uri: `${origin.uri}/comments`,
+        auth: {
+            username: username,
+            password: password
+        },
+        body: {
+            body: `Issue moved to ${dest.html_url}`
+        },
+        json: true
+    }, (err, res, comment) => {
+        if (err) {
+            return console.log(err);
+        }
+
+        console.log(`Added comment ${comment.html_url}`);
+
+        callback(comment);
+    });
+}
+
+function closeIssue(origin, dest) {
+    request.patch({
+        uri: `${origin.url}`,
+        auth: {
+            username: username,
+            password: password
+        },
+        body: {
+            state: 'closed'
+        },
+        json: true
+    }, (err, res, issue) => {
+        if (err) {
+            return console.log(err);
+        }
+
+        console.log(`Closed issue ${origin.html_url}`);
+
+        addComment(origin, dest, (comment) => {
+            console.log(`Moved issue successfully from ${origin.html_url} to ${dest.html_url}.`);
+        });
+    });
+}
