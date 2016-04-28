@@ -1,6 +1,6 @@
 {
   "name": "ghi",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Command line interface for managing GitHub Issues.",
   "main": "ghi.js",
   "scripts": {
@@ -13,7 +13,6 @@
   "license": "ISC",
   "dependencies": {
     "commander": "^2.9.0",
-    "moment": "^2.13.0",
     "prompt": "^1.0.0",
     "request": "^2.72.0"
   }
